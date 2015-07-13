@@ -9,6 +9,8 @@ import socket
 import json
 
 from sh import pg_dump
+from sh import psql
+from lib.vx_postgres import BasePostgres
 
 
 logging.basicConfig(level=logging.DEBUG,
@@ -251,14 +253,21 @@ def restore_database(dest_folder, database_name, super_user_pass, host, port):
         port (int): Port number where the instance is llinstening
     """
     logger.info("Restoring database %s", database_name)
-    dump_name = os.path.join(dest_folder, 'database_dump.b64')
-    logger.debug("Restore dump - reading file %s", dump_name)
-    with open(dump_name, "r") as fin:
-        b64_str = fin.read()
-        logger.debug("File loaded")
-    oerp = oerplib.OERP(host, protocol='xmlrpc', port=port, timeout=3000)
-    logger.debug("Connection to OERP established, restoring...")
-    oerp.db.restore(super_user_pass, database_name, b64_str)
+    if "database_dump.b64" in os.listdir(dest_folder):
+        dump_name = os.path.join(dest_folder, "database_dump.b64")
+        logger.debug("Restore dump - reading file %s", dump_name)
+        with open(dump_name, "r") as fin:
+            b64_str = fin.read()
+            logger.debug("File loaded")
+        oerp = oerplib.OERP(host, protocol='xmlrpc', port=port, timeout=3000)
+        logger.debug("Connection to OERP established, restoring...")
+        oerp.db.restore(super_user_pass, database_name, b64_str)
+    elif "database_dump.sql" in os.listdir(dest_folder):
+        dump_name = os.path.join(dest_folder, "database_dump.sql")
+        with BasePostgres(config={'dbname': 'postgres'}) as database:
+            database.execute("CREATE DATABASE %s ENCODING 'UTF8' TEMPLATE template1 OWNER odoo" %
+                             database_name)
+            psql(database_name, file=dump_name, port=port, host=host)
 
 
 def database_exists(database_name, host, port=8069, timeout=3000):
