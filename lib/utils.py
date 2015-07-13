@@ -8,6 +8,9 @@ import oerplib
 import socket
 import json
 
+from sh import pg_dump
+
+
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('utils')
@@ -163,7 +166,7 @@ def dump_database(dest_folder, database_name, super_user_pass, host, port):
     Args:
         dest_folder (str): Folder where the function will save the dump
         database_name (str): Database name that will be dumped
-        super_user_pass (str): Super user password to be used 
+        super_user_pass (str): Super user password to be used
                                to connect with odoo instance
         host (str): Host name or IP address to connect
         port (int): Port number which Odoo instance is listening to
@@ -171,15 +174,22 @@ def dump_database(dest_folder, database_name, super_user_pass, host, port):
         The full dump path and name with .b64 extension
     """
     logger.debug("Dumping database %s into %s folder", database_name, dest_folder)
-    dump_name = os.path.join(dest_folder, 'database_dump.b64')
-    oerp = oerplib.OERP(host, protocol='xmlrpc', port=port, timeout=3000)
-    binary_data = oerp.db.dump(super_user_pass, database_name)
-    with open(dump_name, "w") as fout:
-        fout.write(binary_data)
+    dump_name = os.path.join(dest_folder, "database_dump.b64")
+    try:
+        oerp = oerplib.OERP(host, protocol='xmlrpc', port=port, timeout=3000)
+        binary_data = oerp.db.dump(super_user_pass, database_name)
+        with open(dump_name, "w") as fout:
+            fout.write(binary_data)
+    except:
+        logger.error("OERP dump failed. Trying PG_DUMP")
+        dump_name = os.path.join(dest_folder, "database_dump.sql")
+        pg_dump(database_name, no_owner=True, file=dump_name, host=host,
+                port=port)
     return dump_name
 
 
-def backup_database(database_name, dest_folder, user, password, host, port, reason=False, tmp_dir=False):
+def backup_database(database_name, dest_folder, user, password, host, port,
+                    reason=False, tmp_dir=False):
     """ Receive database name and back it up
 
     Args:
@@ -191,19 +201,26 @@ def backup_database(database_name, dest_folder, user, password, host, port, reas
         port (int): Port number where the instance is llinstening
         reason (str): Optional parameter that is used in case 
                       there is a particular reason for the backup
-        tmp_dir (str): Optional parameter to store the temporary working dir, default is /tmp
+        tmp_dir (str): Optional parameter to store the temporary working dir,
+                       default is /tmp
 
     Returns:
         Full path to the backup
     """
-    files = []
-    if reason:
-        file_name = '%s_%s_%s'% \
-                    (database_name, reason, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-    else:
-        file_name = '%s_%s'%(database_name, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     logger.info("Dumping database")
     dbase = dump_database(tmp_dir, database_name, password, host, port)
+    files = []
+    file_name = database_name
+    if "sql" in dbase.split("."):
+        file_name = "%s_%s"%(file_name, "sql")
+    if reason:
+        file_name = '%s_%s_%s'% \
+                    (file_name, reason,
+                     datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    else:
+        file_name = '%s_%s'% \
+                    (file_name,
+                     datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     files.append(os.path.join(tmp_dir, dbase))
     logger.info("Compressing dump %s", dbase)
     full_name = compress_files(file_name, files, dest_folder)
